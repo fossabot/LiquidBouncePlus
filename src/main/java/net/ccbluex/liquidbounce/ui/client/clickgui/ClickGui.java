@@ -16,19 +16,16 @@ import net.ccbluex.liquidbounce.ui.client.clickgui.style.Style;
 import net.ccbluex.liquidbounce.ui.client.clickgui.style.styles.SlowlyStyle;
 import net.ccbluex.liquidbounce.ui.client.hud.designer.GuiHudDesigner;
 import net.ccbluex.liquidbounce.ui.font.AWTFontRenderer;
-import net.ccbluex.liquidbounce.utils.AnimationUtils;
 import net.ccbluex.liquidbounce.utils.EntityUtils;
 import net.ccbluex.liquidbounce.utils.render.ColorUtils;
-import net.ccbluex.liquidbounce.utils.render.RenderUtils;
-import net.ccbluex.liquidbounce.utils.render.UiUtils;
 import net.ccbluex.liquidbounce.utils.render.EaseUtils;
+import net.ccbluex.liquidbounce.utils.render.RenderUtils;
 import net.minecraft.client.audio.PositionedSoundRecord;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.input.Mouse;
-import org.lwjgl.opengl.GL11;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -318,11 +315,9 @@ public class ClickGui extends GuiScreen {
 
         switch (Objects.requireNonNull(LiquidBounce.moduleManager.getModule(ClickGUI.class)).animationValue.get().toLowerCase()) {
             case "azura":
-            GlStateManager.translate(0, (1.0 - slide) * height * -2.0, 0);
-            break;
             case "slide":
             case "slidebounce":
-            GlStateManager.translate(0, (1.0 - slide) * height * -2.0, 0);
+                GlStateManager.translate(0, (1.0 - slide) * height * -2.0, 0);
             break;
             case "zoom":
             GlStateManager.translate(-1 * (1.0 - slide) * (width / 2.0), -1 * (1.0 - slide) * (height / 2.0), -1 * (1.0 - slide) * (width / 2.0));
@@ -342,9 +337,14 @@ public class ClickGui extends GuiScreen {
         super.handleMouseInput();
 
         int wheel = Mouse.getEventDWheel();
+        boolean shouldScroll = true;
         for (int i = panels.size() - 1; i >= 0; i--)
             if (panels.get(i).handleScroll(mouseX, mouseY, wheel))
-                break;
+                shouldScroll = false;
+
+        if (shouldScroll)
+            for (int i = panels.size() - 1; i >= 0; i--)
+                panels.get(i).y += wheel / 4;
     }
 
     @Override
