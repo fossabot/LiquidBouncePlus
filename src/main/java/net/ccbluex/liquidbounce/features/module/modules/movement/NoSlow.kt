@@ -6,11 +6,7 @@
 package net.ccbluex.liquidbounce.features.module.modules.movement
 
 import net.ccbluex.liquidbounce.LiquidBounce
-import net.ccbluex.liquidbounce.event.EventTarget
-import net.ccbluex.liquidbounce.event.EventState
-import net.ccbluex.liquidbounce.event.MotionEvent
-import net.ccbluex.liquidbounce.event.SlowDownEvent
-import net.ccbluex.liquidbounce.event.PacketEvent
+import net.ccbluex.liquidbounce.event.*
 import net.ccbluex.liquidbounce.features.module.Module
 import net.ccbluex.liquidbounce.features.module.ModuleCategory
 import net.ccbluex.liquidbounce.features.module.ModuleInfo
@@ -26,22 +22,19 @@ import net.ccbluex.liquidbounce.value.ListValue
 import net.minecraft.item.*
 import net.minecraft.network.Packet
 import net.minecraft.network.play.INetHandlerPlayServer
-import net.minecraft.network.play.client.C0BPacketEntityAction
-import net.minecraft.network.play.client.C03PacketPlayer
+import net.minecraft.network.play.client.*
 import net.minecraft.network.play.client.C03PacketPlayer.C04PacketPlayerPosition
 import net.minecraft.network.play.client.C03PacketPlayer.C05PacketPlayerLook
 import net.minecraft.network.play.client.C03PacketPlayer.C06PacketPlayerPosLook
-import net.minecraft.network.play.client.C07PacketPlayerDigging
-import net.minecraft.network.play.client.C08PacketPlayerBlockPlacement
-import net.minecraft.network.play.client.C09PacketHeldItemChange
 import net.minecraft.network.play.server.S30PacketWindowItems
 import net.minecraft.util.BlockPos
 import net.minecraft.util.EnumFacing
+import java.util.*
 
 @ModuleInfo(name = "NoSlow", spacedName = "No Slow", category = ModuleCategory.MOVEMENT, description = "Prevent you from getting slowed down by items (swords, foods, etc.) and liquids.")
 class NoSlow : Module() {
     private val msTimer = MSTimer()
-    private val modeValue = ListValue("PacketMode", arrayOf("Vanilla", "Watchdog", "OldWatchdog", "OldHypixel", "Blink", "Experimental", "NCP", "AAC", "AAC5", "Custom"), "Vanilla")
+    private val modeValue = ListValue("PacketMode", arrayOf("Vanilla", "Watchdog", "OldWatchdog", "OldHypixel", "Blink", "Experimental", "NCP", "AAC", "AAC5", "Custom", "Matrix", "Vulcan"), "Vanilla")
     private val blockForwardMultiplier = FloatValue("BlockForwardMultiplier", 1.0F, 0.2F, 1.0F, "x")
     private val blockStrafeMultiplier = FloatValue("BlockStrafeMultiplier", 1.0F, 0.2F, 1.0F, "x")
     private val consumeForwardMultiplier = FloatValue("ConsumeForwardMultiplier", 1.0F, 0.2F, 1.0F, "x")
@@ -50,14 +43,14 @@ class NoSlow : Module() {
     private val bowStrafeMultiplier = FloatValue("BowStrafeMultiplier", 1.0F, 0.2F, 1.0F, "x")
     val sneakForwardMultiplier = FloatValue("SneakForwardMultiplier", 1.0F, 0.3F, 1.0F, "x")
     val sneakStrafeMultiplier = FloatValue("SneakStrafeMultiplier", 1.0F, 0.3F, 1.0F, "x")
-    private val customRelease = BoolValue("CustomReleasePacket", false, { modeValue.get().equals("custom", true) })
-    private val customPlace = BoolValue("CustomPlacePacket", false, { modeValue.get().equals("custom", true) })
-    private val customOnGround = BoolValue("CustomOnGround", false, { modeValue.get().equals("custom", true) })
-    private val customDelayValue = IntegerValue("CustomDelay", 60, 0, 1000, "ms", { modeValue.get().equals("custom", true) })
-    private val testValue = BoolValue("SendPacket", false, { modeValue.get().equals("watchdog", true) })
-    private val ciucValue = BoolValue("CheckInUseCount", true, { modeValue.get().equals("blink", true) })
-    private val packetTriggerValue = ListValue("PacketTrigger", arrayOf("PreRelease", "PostRelease"), "PostRelease", { modeValue.get().equals("blink", true) })
-    private val debugValue = BoolValue("Debug", false, { modeValue.get().equals("watchdog", true) || modeValue.get().equals("blink", true) })
+    private val customRelease = BoolValue("CustomReleasePacket", false) { modeValue.get().equals("custom", true) }
+    private val customPlace = BoolValue("CustomPlacePacket", false) { modeValue.get().equals("custom", true) }
+    private val customOnGround = BoolValue("CustomOnGround", false) { modeValue.get().equals("custom", true) }
+    private val customDelayValue = IntegerValue("CustomDelay", 60, 0, 1000, "ms") { modeValue.get().equals("custom", true) }
+    private val testValue = BoolValue("SendPacket", false) { modeValue.get().equals("watchdog", true) }
+    private val ciucValue = BoolValue("CheckInUseCount", true) { modeValue.get().equals("blink", true) }
+    private val packetTriggerValue = ListValue("PacketTrigger", arrayOf("PreRelease", "PostRelease"), "PostRelease") { modeValue.get().equals("blink", true) }
+    private val debugValue = BoolValue("Debug", false) { modeValue.get().equals("watchdog", true) || modeValue.get().equals("blink", true) }
 
     // Soulsand
     val soulsandValue = BoolValue("Soulsand", true)
@@ -68,10 +61,13 @@ class NoSlow : Module() {
     private var lastY = 0.0
     private var lastZ = 0.0
     private var lastOnGround = false
-
+    private var packetBuf = LinkedList<Packet<INetHandlerPlayServer>>()
+    private var nextTemp = false
+    private var waitC03 = false
     private var fasterDelay = false
     private var placeDelay = 0L
     private val timer = MSTimer()
+    private var lastBlockingStat = false
 
     override fun onEnable() {
         blinkPackets.clear()
@@ -85,7 +81,7 @@ class NoSlow : Module() {
         blinkPackets.clear()
     }
 
-    override val tag: String?
+    override val tag: String
         get() = modeValue.get()
 
     private fun sendPacket(event : MotionEvent, sendC07 : Boolean, sendC08 : Boolean, delay : Boolean, delayValue : Long, onGround : Boolean, watchDog : Boolean = false) {
@@ -117,7 +113,20 @@ class NoSlow : Module() {
     @EventTarget
     fun onPacket(event: PacketEvent) {
         val packet = event.packet
-        val killAura = LiquidBounce.moduleManager[KillAura::class.java]!! as KillAura
+        val killAura = LiquidBounce.moduleManager[KillAura::class.java]!!
+
+        if((modeValue.equals("Matrix") || modeValue.equals("Vulcan")) && nextTemp) {
+            if ((packet is C07PacketPlayerDigging || packet is C08PacketPlayerBlockPlacement) && isBlocking) {
+                event.cancelEvent()
+            } else if (packet is C03PacketPlayer || packet is C0APacketAnimation || packet is C0BPacketEntityAction || packet is C02PacketUseEntity || packet is C07PacketPlayerDigging || packet is C08PacketPlayerBlockPlacement) {
+                if (modeValue.equals("Vulcan") && waitC03 && packet is C03PacketPlayer) {
+                    waitC03 = false
+                    return
+                }
+                packetBuf.add(packet as Packet<INetHandlerPlayServer>)
+                event.cancelEvent()
+            }
+        }
 
         if (modeValue.get().equals("watchdog", true) && packet is S30PacketWindowItems && (mc.thePlayer.isUsingItem || mc.thePlayer.isBlocking)) {
             event.cancelEvent()
@@ -174,6 +183,38 @@ class NoSlow : Module() {
                         blinkPackets.clear()
                     }
                 }
+            }
+        }
+    }
+
+    @EventTarget
+    fun onUpdate(event: UpdateEvent) {
+        if((modeValue.equals("Matrix") || modeValue.equals("Vulcan")) && (lastBlockingStat || isBlocking)) {
+            if(msTimer.hasTimePassed(230) && nextTemp) {
+                nextTemp = false
+                PacketUtils.sendPacketNoEvent(C07PacketPlayerDigging(C07PacketPlayerDigging.Action.RELEASE_USE_ITEM, BlockPos(-1, -1, -1), EnumFacing.DOWN))
+                if(packetBuf.isNotEmpty()) {
+                    var canAttack = false
+                    for(packet in packetBuf) {
+                        if(packet is C03PacketPlayer) {
+                            canAttack = true
+                        }
+                        if(!((packet is C02PacketUseEntity || packet is C0APacketAnimation) && !canAttack)) {
+                            PacketUtils.sendPacketNoEvent(packet)
+                        }
+                    }
+                    packetBuf.clear()
+                }
+            }
+            if(!nextTemp) {
+                lastBlockingStat = isBlocking
+                if (!isBlocking) {
+                    return
+                }
+                PacketUtils.sendPacketNoEvent(C08PacketPlayerBlockPlacement(BlockPos(-1, -1, -1), 255, mc.thePlayer.inventory.getCurrentItem(), 0f, 0f, 0f))
+                nextTemp = true
+                waitC03 = modeValue.equals("Vulcan")
+                msTimer.reset()
             }
         }
     }
@@ -277,4 +318,7 @@ class NoSlow : Module() {
         }
         else -> 0.2F
     }
+
+    private val isBlocking: Boolean
+        get() = (mc.thePlayer.isUsingItem || LiquidBounce.moduleManager[KillAura::class.java]!!.blockingStatus) && mc.thePlayer.heldItem != null && mc.thePlayer.heldItem.item is ItemSword
 }

@@ -45,6 +45,7 @@ public class AntiBot extends Module {
     private final BoolValue czechHekValue = new BoolValue("CzechMatrix", false);
     private final BoolValue czechHekPingCheckValue = new BoolValue("PingCheck", true, () -> czechHekValue.get());
     private final BoolValue czechHekGMCheckValue = new BoolValue("GamemodeCheck", true, () -> czechHekValue.get());
+    private final BoolValue matrixIllegalNameValue = new BoolValue("MatrixIllegalName", false);
     private final BoolValue tabValue = new BoolValue("Tab", true);
     private final ListValue tabModeValue = new ListValue("TabMode", new String[] {"Equals", "Contains"}, "Contains");
     private final BoolValue entityIDValue = new BoolValue("EntityID", true);
@@ -128,6 +129,20 @@ public class AntiBot extends Module {
                         if (debugValue.get()) ClientUtils.displayChatMessage("§7[§a§lAnti Bot/§6Matrix§7] §fPrevented §r"+data.getProfile().getName()+" §ffrom spawning.");
                     }
                 }
+            }
+        }
+
+        if(matrixIllegalNameValue.get()) {
+            if (packet instanceof S38PacketPlayerListItem) {
+                String entityName = ((S38PacketPlayerListItem) packet).getEntries().get(0).getProfile().getName();
+                mc.theWorld.loadedEntityList.forEach(entity -> {
+                    if (entity instanceof EntityPlayer) {
+                        if (entity.getName().equals(entityName)) {
+                            if (debugValue.get()) ClientUtils.displayChatMessage("§7[§a§lAnti Bot/§6Matrix§7] §fPrevented §r"+entityName+" §ffrom spawning.");
+                            event.cancelEvent();
+                        }
+                    }
+                });
             }
         }
 
